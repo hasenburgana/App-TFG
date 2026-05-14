@@ -316,6 +316,93 @@ def cluster_percentiles(df_pos: pd.DataFrame, cluster: int, metrics: Iterable[st
     return result
 
 
+def all_derived_metric_columns(df: pd.DataFrame) -> list[str]:
+    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+    return sorted(
+        col
+        for col in numeric_cols
+        if col not in METADATA_COLS
+        and not col.startswith("cluster")
+        and (
+            col.endswith(DERIVED_METRIC_SUFFIXES)
+            or col.startswith(DERIVED_METRIC_PREFIXES)
+            or col in DERIVED_METRIC_NAMES
+        )
+    )
+
+
+def radar_angles(n_metrics: int) -> list[float]:
+    return [i * 360.0 / n_metrics for i in range(n_metrics)]
+
+
+def player_cluster_radar_figure(
+    player_name: str,
+    cluster: int,
+    player_pct: dict[str, float],
+    cluster_pct: dict[str, float],
+) -> go.Figure:
+    metrics = list(player_pct.keys())
+    labels = [clean_metric_name(metric) for metric in metrics]
+    angles = radar_angles(len(metrics))
+    closed_angles = angles + [360.0]
+    player_values = [player_pct[metric] for metric in metrics]
+    cluster_values = [cluster_pct[metric] for metric in metrics]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatterpolar(
+            r=player_values + player_values[:1],
+            theta=closed_angles,
+            mode="lines+markers",
+            fill="toself",
+            name=player_name,
+            line=dict(color="#2357c6", width=3),
+            marker=dict(size=6),
+            text=labels + labels[:1],
+            hovertemplate="%{text}<br>Percentil %{r:.0f}%<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatterpolar(
+            r=cluster_values + cluster_values[:1],
+            theta=closed_angles,
+            mode="lines+markers",
+            fill="toself",
+            name=f"Media cluster {cluster}",
+            line=dict(color="#0f8f8c", width=2),
+            marker=dict(size=5),
+            text=labels + labels[:1],
+            hovertemplate="%{text}<br>Percentil %{r:.0f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        height=650,
+        margin=dict(l=65, r=65, t=35, b=35),
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                tickvals=[0, 20, 40, 60, 80, 100],
+                ticksuffix="%",
+                gridcolor="#d8dee8",
+            ),
+            angularaxis=dict(
+                tickmode="array",
+                tickvals=angles,
+                ticktext=labels,
+                rotation=90,
+                direction="clockwise",
+                tickfont=dict(size=10, color="#667085"),
+                gridcolor="#d8dee8",
+            ),
+        ),
+        legend=dict(orientation="h", y=-0.08),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
+
+
 def cluster_radar_figure(df_pos: pd.DataFrame, metrics: list[str], position: str, top_n: int = 15) -> go.Figure:
     medias_clusters = df_pos.groupby(CLUSTER_COL)[metrics].mean(numeric_only=True).sort_index()
     selected_metrics = top_discriminant_metrics(df_pos, metrics, top_n)
@@ -535,14 +622,11 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     player_pct = player_percentiles(df_pos, player, top_metrics)
     cluster_pct = cluster_percentiles(df_pos, cluster, top_metrics)
 
-    st.subheader("Radares de perfiles tácticos")
-    st.plotly_chart(cluster_radar_figure(df_pos, metrics, position, top_n=15), use_container_width=True)
-
-    left, right = st.columns([1.15, 1])
+    left, right = st.columns([1.25, 1])
     with left:
-        st.subheader("Jugadora vs media de su cluster")
+        st.subheader("Radar interactivo")
         st.plotly_chart(
-            player_cluster_bar_figure(str(player[PLAYER_COL]), cluster, player_pct, cluster_pct),
+            player_cluster_radar_figure(str(player[PLAYER_COL]), cluster, player_pct, cluster_pct),
             use_container_width=True,
         )
 
@@ -578,12 +662,28 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
 
 def render_profile_mode(df: pd.DataFrame, position: str) -> None:
     df_pos = df[df[POSITION_COL] == position].copy()
-    metrics = metric_columns(df_pos, position)
+    metric_scope = st.radio(
+        "Conjunto de métricas",
+        [
+            "Métricas del clustering de esta posición",
+            "Todas las métricas derivadas",
+        ],
+        horizontal=True,
+        help=(
+            "La primera opción es la más coherente con la metodología del clustering. "
+            "La segunda sirve para perfiles personalizados más exploratorios."
+        ),
+    )
+    if metric_scope == "Métricas del clustering de esta posición":
+        metrics = metric_columns(df_pos, position)
+    else:
+        metrics = all_derived_metric_columns(df_pos)
     suggested = top_discriminant_metrics(df_pos, metrics, 18)
 
     st.subheader("Crear un perfil con métricas y pesos")
     st.caption(
-        "Solo se muestran las métricas usadas para construir perfiles en esa posición. "
+        "Recomendado: usa las métricas del clustering para mantener coherencia metodológica. "
+        "El modo avanzado permite explorar otras métricas normalizadas o derivadas. "
         "Peso positivo: busca valores altos. Peso negativo: busca valores bajos. Cero: no se usa."
     )
 
