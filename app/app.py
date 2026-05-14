@@ -32,6 +32,8 @@ METADATA_COLS = {
     "cluster_fa",
     "cluster_pca",
     "cluster_hier",
+    "es_medoide",
+    "nombre_medoide_cluster",
 }
 
 POS_METRICS = {
@@ -307,6 +309,14 @@ def player_percentiles(df_pos: pd.DataFrame, player: pd.Series, metrics: Iterabl
     return {metric: percentile(df_pos[metric], player[metric]) for metric in metrics}
 
 
+def scaled_p05_p95_values(df_pos: pd.DataFrame, row: pd.Series, metrics: list[str]) -> dict[str, float]:
+    p05 = df_pos[metrics].quantile(0.05)
+    p95 = df_pos[metrics].quantile(0.95)
+    diff = (p95 - p05).replace(0, 1)
+    values = ((row[metrics] - p05) / diff).clip(0, 1) * 0.70 + 0.15
+    return values.astype(float).to_dict()
+
+
 def cluster_percentiles(df_pos: pd.DataFrame, cluster: int, metrics: Iterable[str]) -> dict[str, float]:
     df_cluster = df_pos[df_pos[CLUSTER_COL] == cluster]
     result = {}
@@ -314,6 +324,29 @@ def cluster_percentiles(df_pos: pd.DataFrame, cluster: int, metrics: Iterable[st
         mean_value = df_cluster[metric].mean()
         result[metric] = percentile(df_pos[metric], mean_value)
     return result
+
+
+def cluster_medoid_player(df_pos: pd.DataFrame, cluster: int) -> pd.Series:
+    df_cluster = df_pos[df_pos[CLUSTER_COL] == cluster]
+    if df_cluster.empty:
+        return df_pos.iloc[0]
+
+    if "es_medoide" in df_cluster.columns:
+        medoid_mask = df_cluster["es_medoide"].astype(str).str.lower().isin(["true", "1", "si", "sí"])
+        if medoid_mask.any():
+            return df_cluster[medoid_mask].iloc[0]
+
+    if "nombre_medoide_cluster" in df_cluster.columns:
+        medoid_name = str(df_cluster["nombre_medoide_cluster"].dropna().iloc[0]).strip()
+        if medoid_name:
+            same_name = df_pos[df_pos[PLAYER_COL].astype(str).str.strip() == medoid_name]
+            same_cluster = same_name[same_name[CLUSTER_COL] == cluster]
+            if not same_cluster.empty:
+                return same_cluster.iloc[0]
+            if not same_name.empty:
+                return same_name.iloc[0]
+
+    return df_cluster.iloc[0]
 
 
 def all_derived_metric_columns(df: pd.DataFrame) -> list[str]:
@@ -338,15 +371,17 @@ def radar_angles(n_metrics: int) -> list[float]:
 def player_cluster_radar_figure(
     player_name: str,
     cluster: int,
-    player_pct: dict[str, float],
-    cluster_pct: dict[str, float],
+    player_values_by_metric: dict[str, float],
+    medoid_name: str,
+    medoid_values_by_metric: dict[str, float],
+    position: str,
 ) -> go.Figure:
-    metrics = list(player_pct.keys())
+    metrics = list(player_values_by_metric.keys())
     labels = [clean_metric_name(metric) for metric in metrics]
     angles = radar_angles(len(metrics))
     closed_angles = angles + [360.0]
-    player_values = [player_pct[metric] for metric in metrics]
-    cluster_values = [cluster_pct[metric] for metric in metrics]
+    player_values = [player_values_by_metric[metric] for metric in metrics]
+    medoid_values = [medoid_values_by_metric[metric] for metric in metrics]
 
     fig = go.Figure()
     fig.add_trace(
@@ -356,35 +391,37 @@ def player_cluster_radar_figure(
             mode="lines+markers",
             fill="toself",
             name=player_name,
-            line=dict(color="#2357c6", width=3),
+            line=dict(color="#E74C3C", width=3),
             marker=dict(size=6),
             text=labels + labels[:1],
-            hovertemplate="%{text}<br>Percentil %{r:.0f}%<extra></extra>",
+            hovertemplate="%{text}<br>Escala p05-p95: %{r:.2f}<extra></extra>",
         )
     )
     fig.add_trace(
         go.Scatterpolar(
-            r=cluster_values + cluster_values[:1],
+            r=medoid_values + medoid_values[:1],
             theta=closed_angles,
             mode="lines+markers",
             fill="toself",
-            name=f"Media cluster {cluster}",
-            line=dict(color="#0f8f8c", width=2),
+            name=f"Medoide Cluster {cluster} ({medoid_name[:24]})",
+            line=dict(color="#95A5A6", width=2.5),
             marker=dict(size=5),
             text=labels + labels[:1],
-            hovertemplate="%{text}<br>Percentil %{r:.0f}%<extra></extra>",
+            hovertemplate="%{text}<br>Escala p05-p95: %{r:.2f}<extra></extra>",
         )
     )
     fig.update_layout(
+        title=f"{player_name} — {position} (cluster {cluster})",
         height=650,
-        margin=dict(l=65, r=65, t=35, b=35),
+        margin=dict(l=70, r=70, t=70, b=45),
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[0, 100],
-                tickvals=[0, 20, 40, 60, 80, 100],
-                ticksuffix="%",
+                range=[0, 1],
+                tickvals=[0.15, 0.5, 0.85],
+                ticktext=["p05", "p50", "p95"],
                 gridcolor="#d8dee8",
+                tickfont=dict(size=10, color="#667085"),
             ),
             angularaxis=dict(
                 tickmode="array",
@@ -396,7 +433,7 @@ def player_cluster_radar_figure(
                 gridcolor="#d8dee8",
             ),
         ),
-        legend=dict(orientation="h", y=-0.08),
+        legend=dict(orientation="h", y=1.08, x=0.62, xanchor="center"),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
@@ -619,19 +656,28 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     col_b.metric("Jugadoras en cluster", int((df_pos[CLUSTER_COL] == cluster).sum()))
     col_c.metric("Métricas del radar", len(top_metrics))
 
-    player_pct = player_percentiles(df_pos, player, top_metrics)
-    cluster_pct = cluster_percentiles(df_pos, cluster, top_metrics)
+    medoid = cluster_medoid_player(df_pos, cluster)
+    player_radar_values = scaled_p05_p95_values(df_pos, player, top_metrics)
+    medoid_radar_values = scaled_p05_p95_values(df_pos, medoid, top_metrics)
 
     left, right = st.columns([1.25, 1])
     with left:
         st.subheader("Radar interactivo")
         st.plotly_chart(
-            player_cluster_radar_figure(str(player[PLAYER_COL]), cluster, player_pct, cluster_pct),
+            player_cluster_radar_figure(
+                str(player[PLAYER_COL]),
+                cluster,
+                player_radar_values,
+                str(medoid[PLAYER_COL]),
+                medoid_radar_values,
+                position,
+            ),
             use_container_width=True,
         )
 
     with right:
         st.subheader("Lectura del cluster")
+        st.write(f"**Medoide del cluster:** {medoid[PLAYER_COL]}")
         z_summary = cluster_z_summary(df_pos, cluster, top_metrics)
         strengths = z_summary.head(4)
         weaknesses = z_summary.tail(4).sort_values("z")
