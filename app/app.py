@@ -505,9 +505,9 @@ div[data-testid="column"] { background: transparent !important; }
 @st.cache_data
 def load_custom_photos():
     # Esto busca la carpeta donde está app.py
-    base_path = Path(__file__).parent if "__file__" in locals() else Path.cwd()
-    json_path = base_path / "jugadoras_fotos.json"
-    
+    #base_path = Path(__file__).parent if "__file__" in locals() else Path.cwd()
+    #json_path = base_path / "jugadoras_fotos.json"
+    json_path = "app/jugadoras_fotos.json"
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
