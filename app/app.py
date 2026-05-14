@@ -342,6 +342,7 @@ def get_player_photo_b64(player_name: str) -> str | None:
 #     return f'<div style="width:{size}px;height:{size}px;border-radius:50%;background:{border_color};display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:{size//3}px;border:3px solid {border_color};">{initials}</div>'
 def player_avatar_html(
     player_name: str,
+    team_name: str = None
     size: int = 72,
     border_color: str = "#2A9D8F",
     fetch_photo: bool = True
@@ -1093,12 +1094,17 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     team_name = str(player[TEAM_COL])
     player_display_name = str(player[PLAYER_COL])
     
-    # Generar el avatar (usará la foto del JSON si existe)
+    # FIX 1: Usamos 'fetch_photos' (con S) que es como la definiste en el toggle superior
+    # FIX 2: Añadimos 'team_name=team_name' para que la función sepa de qué país es la jugadora
     avatar_html = player_avatar_html(
-        player_display_name, size=80, border_color=cluster_color, fetch_photo=fetch_photo
+        player_display_name, 
+        team_name=team_name, # <--- Añade esto
+        size=80, 
+        border_color=cluster_color, 
+        fetch_photo=fetch_photos # <--- Cambia fetch_photo por fetch_photos
     )
     
-    # Buscar si el equipo tiene bandera en el JSON
+    # Buscar si el equipo tiene bandera en el JSON para el texto del header
     flag_html = ""
     if team_name in CUSTOM_PHOTOS:
         flag_url = CUSTOM_PHOTOS[team_name]
