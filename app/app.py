@@ -308,41 +308,7 @@ def get_player_photo_b64(player_name: str) -> str | None:
     miss_file.touch()
     return None
 
-'''
-def player_avatar_html(
-    player_name: str,
-    size: int = 72,
-    border_color: str = "#2A9D8F",
-    fetch_photo: bool = True,
-) -> str:
-    """Return an <img> tag with the player's photo or a stylish initials fallback."""
-    b64 = None
-    if fetch_photo:
-        try:
-            b64 = get_player_photo_b64(player_name)
-        except Exception:
-            pass
 
-    if b64:
-        return (
-            f'<img src="data:image/png;base64,{b64}" '
-            f'style="width:{size}px;height:{size}px;border-radius:50%;'
-            f'object-fit:cover;border:2.5px solid {border_color};'
-            f'background:#0d1b2a;" />'
-        )
-
-    # Initials fallback
-    parts = player_name.strip().split()
-    initials = "".join(p[0].upper() for p in parts[:2]) if parts else "?"
-    bg = border_color
-    return (
-        f'<div style="width:{size}px;height:{size}px;border-radius:50%;'
-        f'background:{bg};border:2.5px solid {border_color};'
-        f'display:flex;align-items:center;justify-content:center;'
-        f'font-size:{size // 3}px;font-weight:800;color:#fff;'
-        f'font-family:\'DM Sans\',sans-serif;letter-spacing:1px;">'
-        f'{initials}</div>'
-    )'''
 def player_avatar_html(player_name: str, team_name: str, size: int = 80, border_color: str = "#2A9D8F", fetch_photo: bool = True) -> str:
     """Versión con team_name obligatorio para organización estricta."""
     team_slug = get_safe_path(team_name)
@@ -1071,10 +1037,7 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
         border_color=cluster_color,
         fetch_photo=fetch_photos,
     )
-    '''avatar_html = player_avatar_html(
-        str(player[PLAYER_COL]), size=80, border_color=cluster_color,
-        fetch_photo=fetch_photos,
-    )'''
+    
     # Lógica para el escudo
     badge_path = Path("assets/players") / get_safe_path(team_name) / "escudo.png"
     if fetch_photos and not badge_path.exists():
