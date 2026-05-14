@@ -17,6 +17,7 @@ import os
 import unicodedata
 import urllib.parse
 import json
+import base64
 
 # ──────────────────────────────────────────────
 # CONSTANTS
@@ -116,20 +117,94 @@ st.set_page_config(
 # PLAYER PHOTO HELPERS
 # ──────────────────────────────────────────────
 
-PHOTO_CACHE_DIR = Path(".photo_cache_v2")
-PHOTO_CACHE_DIR.mkdir(exist_ok=True)
+# --- CONFIGURACIÓN DE RUTAS ---
+ASSETS_DIR = Path("assets")
+PLAYERS_DIR = ASSETS_DIR / "players"
+PLAYERS_DIR.mkdir(parents=True, exist_ok=True) # Crea la carpeta si no existe
 
-FOTMOB_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://www.fotmob.com/",
-    "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+# Diccionario para nombres complicados (StatsBomb -> Wikipedia)
+MANUAL_NAME_MAP = {
+    "Maria Francesca Caldentey Oliver": "Mariona Caldentey",
+    "María Pilar León Cebrián": "Mapi León",
+    "Patricia Guijarro Gutiérrez": "Patri Guijarro",
+    "Aitana Bonmati Conca": "Aitana Bonmatí",
+    "Salma Celeste Paralluelo Ayingono": "Salma Paralluelo",
+    "Alba Maria Redondo Ferrer": "Alba Redondo",
+    "Ona Batlle Pascual": "Ona Batlle"
 }
 
+def clean_accents(text: str) -> str:
+    """Elimina tildes y normaliza texto."""
+    if not text: return ""
+    text = unicodedata.normalize('NFD', text)
+    return "".join(c for c in text if unicodedata.category(c) != 'Mn')
 
+def get_safe_path(name: str) -> str:
+    """Crea un nombre de archivo seguro: 'Aitana Bonmatí' -> 'aitana_bonmati'"""
+    return clean_accents(name).strip().replace(" ", "_").lower()
+
+def fetch_wiki_url(name: str) -> str | None:
+    """Busca en la API de Wikipedia la URL de la imagen original."""
+    # Usamos el mapa manual si existe, si no, el nombre tal cual
+    search_name = MANUAL_NAME_MAP.get(name, name)
+    # Reemplazamos espacios por guiones bajos para Wikipedia
+    wiki_name = urllib.parse.quote(search_name.replace(" ", "_"))
+    
+    # Intentamos en español y luego en inglés
+    for lang in ['es', 'en']:
+        try:
+            url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{wiki_name}"
+            req = urllib.request.Request(url, headers={'User-Agent': 'ScoutingApp/1.0'})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+                if "originalimage" in data:
+                    return data["originalimage"]["source"]
+        except:
+            continue
+    return None
+
+def get_player_assets(player_name: str, team_name: str):
+    """
+    Intenta cargar foto y escudo localmente. 
+    Si no existen, los descarga de Wikipedia.
+    """
+    team_slug = get_safe_path(team_name)
+    player_slug = get_safe_path(player_name)
+    
+    # Carpeta por equipo: assets/players/barcelona/
+    team_dir = PLAYERS_DIR / team_slug
+    team_dir.mkdir(parents=True, exist_ok=True)
+    
+    player_path = team_dir / f"{player_slug}.png"
+    badge_path = team_dir / "escudo.png"
+
+    # --- Lógica para la Jugadora ---
+    if not player_path.exists():
+        url = fetch_wiki_url(player_name)
+        if url:
+            try:
+                urllib.request.urlretrieve(url, player_path)
+            except: pass
+
+    # --- Lógica para el Escudo ---
+    if not badge_path.exists():
+        url = fetch_wiki_url(team_name)
+        if url:
+            try:
+                urllib.request.urlretrieve(url, badge_path)
+            except: pass
+
+    # Convertir a Base64 para mostrar en Streamlit
+    def to_b64(p):
+        if p.exists():
+            with open(p, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        return None
+
+    return to_b64(player_path), to_b64(badge_path)
+
+
+#########
 def _player_cache_key(name: str) -> str:
     return hashlib.md5(name.lower().strip().encode()).hexdigest()
 
@@ -141,22 +216,7 @@ FOTMOB_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-def clean_accents(text: str) -> str:
-    """Elimina tildes y marcas diacríticas de un string."""
-    if not text: return text
-    text = unicodedata.normalize('NFD', text)
-    return "".join(c for c in text if unicodedata.category(c) != 'Mn')
-
-MANUAL_NAME_MAP = {
-    "Maria Francesca Caldentey Oliver": "Mariona Caldentey",
-    "María Pilar León Cebrián": "Mapi León",
-    "Patricia Guijarro Gutiérrez": "Patri Guijarro",
-    "Aitana Bonmati Conca": "Aitana Bonmatí",
-    "Salma Celeste Paralluelo Ayingono": "Salma Paralluelo",
-    "Alba Maria Redondo Ferrer": "Alba Redondo",
-    "Ona Batlle Pascual": "Ona Batlle"
-}
-
+######
 def _search_player_fotmob_id(name: str) -> str | None:
     """Busca en FotMob con limpieza de tildes y diccionario manual."""
     
@@ -219,7 +279,7 @@ def _fetch_fotmob_photo(player_id: str, size: int = 96) -> bytes | None:
     except Exception:
         pass
     return None
-
+######
 
 @st.cache_data(show_spinner=False, ttl=86400)
 def get_player_photo_b64(player_name: str) -> str | None:
@@ -248,7 +308,7 @@ def get_player_photo_b64(player_name: str) -> str | None:
     miss_file.touch()
     return None
 
-
+'''
 def player_avatar_html(
     player_name: str,
     size: int = 72,
@@ -282,7 +342,43 @@ def player_avatar_html(
         f'font-size:{size // 3}px;font-weight:800;color:#fff;'
         f'font-family:\'DM Sans\',sans-serif;letter-spacing:1px;">'
         f'{initials}</div>'
-    )
+    )'''
+def player_avatar_html(player_name: str, team_name: str, size: int = 80, border_color: str = "#2A9D8F", fetch_photo: bool = True) -> str:
+    """Versión mejorada: Carga local + Wikipedia."""
+    # Definir rutas
+    team_slug = get_safe_path(team_name)
+    player_slug = get_safe_path(player_name)
+    team_dir = Path("assets/players") / team_slug
+    team_dir.mkdir(parents=True, exist_ok=True)
+    
+    player_path = team_dir / f"{player_slug}.png"
+    
+    # 1. Intentar descargar si no existe
+    if fetch_photo and not player_path.exists():
+        url = fetch_wiki_url(player_name)
+        if url:
+            try:
+                urllib.request.urlretrieve(url, player_path)
+            except: pass
+
+    # 2. Convertir a Base64 para el HTML
+    img_b64 = None
+    if player_path.exists():
+        with open(player_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+
+    # 3. Retornar HTML (Imagen o Avatar genérico)
+    if img_b64:
+        return f'''
+        <img src="data:image/png;base64,{img_b64}" 
+             style="width:{size}px; height:{size}px; border-radius:50%; object-fit:cover; border:3px solid {border_color};">
+        '''
+    else:
+        return f'''
+        <div style="width:{size}px; height:{size}px; border-radius:50%; background:#1a2e45; 
+                    display:flex; align-items:center; justify-content:center; font-size:{size//2}px; 
+                    border:3px solid {border_color}; color:white;">👤</div>
+        '''
 
 
 # Need urllib.parse for quote
@@ -970,10 +1066,32 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     cluster_color = CLUSTER_COLORS[cluster % len(CLUSTER_COLORS)]
     pos_label = POS_LABELS.get(position, position)
     comp = str(player.get("competicion", "—")) if "competicion" in player.index else "—"
+    # Cerca de la línea 48 de tu función render_player_mode:
+    team_name = str(player[TEAM_COL]) # <-- Añade esta línea para tener el equipo
     avatar_html = player_avatar_html(
-        str(player[PLAYER_COL]), size=80, border_color=cluster_color,
+        str(player[PLAYER_COL]), 
+        team_name=team_name,          # <-- Añade este parámetro nuevo
+        size=80, 
+        border_color=cluster_color,
         fetch_photo=fetch_photos,
     )
+    '''avatar_html = player_avatar_html(
+        str(player[PLAYER_COL]), size=80, border_color=cluster_color,
+        fetch_photo=fetch_photos,
+    )'''
+    # Lógica para el escudo
+    badge_path = Path("assets/players") / get_safe_path(team_name) / "escudo.png"
+    if fetch_photos and not badge_path.exists():
+        b_url = fetch_wiki_url(team_name)
+        if b_url:
+            try: urllib.request.urlretrieve(b_url, badge_path)
+            except: pass
+    
+    badge_html = ""
+    if badge_path.exists():
+        with open(badge_path, "rb") as f:
+            b_b64 = base64.b64encode(f.read()).decode()
+            badge_html = f'<img src="data:image/png;base64,{b_b64}" style="width:25px; margin-right:8px; vertical-align:middle;">'
     player_display_name = str(player[PLAYER_COL])
     st.markdown(
         f"""
@@ -983,7 +1101,7 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
                 <div class="player-name">{player_display_name}</div>
                 <div class="player-meta">
                     <span class="pos-badge">{pos_label}</span>
-                    {player[TEAM_COL]} · {comp}
+                    {badge_html} {team_name} · {comp}
                 </div>
                 <span class="cluster-badge" style="background:{cluster_color}">
                     Cluster {cluster}
