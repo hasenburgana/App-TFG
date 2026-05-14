@@ -1,10 +1,27 @@
-# TFG Perfiladoras
+# Scout Profiles Lab
 
-App web local en Java para explorar perfiles de jugadoras.
+App web en Streamlit para explorar perfiles tácticos de jugadoras a partir del CSV exportado desde el notebook de clustering.
 
-## 1. Exportar los datos desde Colab
+## Ejecutar en local
 
-En el notebook, cuando decidas el metodo final, deja una celda como esta:
+```powershell
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Desplegar con GitHub en Streamlit Community Cloud
+
+1. Sube este proyecto a GitHub.
+2. Asegurate de incluir `data/perfiles_finales.csv` si los datos pueden ser publicos.
+3. En Streamlit Community Cloud crea una app nueva.
+4. Selecciona el repositorio, rama y `app.py` como archivo principal.
+5. Deploy.
+
+La app espera encontrar el archivo en `data/perfiles_finales.csv`.
+
+## Exportar datos desde Colab
+
+Cuando decidas el metodo final:
 
 ```python
 metodo_final = resultados_pam_sinpca      # cambia por tu metodo elegido
@@ -21,35 +38,22 @@ df_final = pd.concat(dfs_final, ignore_index=True)
 df_final.to_csv("perfiles_finales.csv", index=False, encoding="utf-8-sig")
 ```
 
-Descarga `perfiles_finales.csv` desde Colab y colocalo en:
+Coloca el archivo en:
 
 ```text
 data/perfiles_finales.csv
 ```
 
-## 2. Ejecutar la app
-
-Desde esta carpeta:
-
-```powershell
-javac -encoding UTF-8 -d out src/main/java/tfg/App.java
-java -cp out tfg.App
-```
-
-Abre:
-
-```text
-http://localhost:8080
-```
-
-## Que incluye
+## Funcionalidades
 
 - Buscador de jugadoras por nombre o equipo.
-- Perfil de cluster para una jugadora.
-- Radar interactivo con percentiles de la jugadora vs media de su cluster.
+- Radar interactivo p05-p95: jugadora vs perfil típico del cluster.
+- Interpretación automática de perfiles por cluster.
+- Glosario integrado con explicación del funcionamiento de la herramienta.
+- Fortalezas y debilidades relativas del cluster.
 - Jugadoras similares dentro de la misma posicion.
-- Modo supervisado: eliges metricas y pesos, y la app calcula un score de encaje.
+- Perfil supervisado: el usuario elige metricas y pesos, y se genera un ranking de encaje.
 
 ## Nota metodologica
 
-Una silueta entre 0.15 y 0.25 no invalida automaticamente el TFG si los clusters tienen lectura futbolistica. En datos de rendimiento deportivo es normal que los perfiles sean continuos y se solapen. Conviene reforzar la validacion con interpretabilidad: medias por cluster, medoides, estabilidad por bootstrap, separacion visual PCA/UMAP y validacion cualitativa de jugadoras conocidas.
+Una silueta entre 0.15 y 0.25 no invalida automaticamente el TFG si los clusters tienen lectura futbolistica. En datos deportivos los perfiles suelen ser continuos y se solapan. Conviene reforzar la validacion con interpretabilidad: medias por cluster, medoides, estabilidad por bootstrap, separacion visual PCA/UMAP y validacion cualitativa de jugadoras conocidas.
