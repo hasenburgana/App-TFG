@@ -116,7 +116,7 @@ st.set_page_config(
 # PLAYER PHOTO HELPERS
 # ──────────────────────────────────────────────
 
-PHOTO_CACHE_DIR = Path(".photo_cache")
+PHOTO_CACHE_DIR = Path(".photo_cache_v2")
 PHOTO_CACHE_DIR.mkdir(exist_ok=True)
 
 FOTMOB_HEADERS = {
