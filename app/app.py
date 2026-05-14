@@ -344,50 +344,36 @@ def player_avatar_html(
         f'{initials}</div>'
     )'''
 def player_avatar_html(player_name: str, team_name: str, size: int = 80, border_color: str = "#2A9D8F", fetch_photo: bool = True) -> str:
-    """Versión mejorada: Carga local + Wikipedia."""
-    # Si no hay equipo, usamos una carpeta genérica
-    team_slug = get_safe_path(team_name) if team_name else "desconocido"
-    player_slug = get_safe_path(player_name)
-    
-    team_dir = Path("assets/players") / team_slug
-    team_dir.mkdir(parents=True, exist_ok=True)
-    
-    player_path = team_dir / f"{player_slug}.png"
-    '''
-    # Definir rutas
+    """Versión con team_name obligatorio para organización estricta."""
     team_slug = get_safe_path(team_name)
     player_slug = get_safe_path(player_name)
+    
     team_dir = Path("assets/players") / team_slug
     team_dir.mkdir(parents=True, exist_ok=True)
     
     player_path = team_dir / f"{player_slug}.png"
-    '''
-    # 1. Intentar descargar si no existe
+    
+    # Descarga si no existe
     if fetch_photo and not player_path.exists():
         url = fetch_wiki_url(player_name)
         if url:
             try:
                 urllib.request.urlretrieve(url, player_path)
             except: pass
-
-    # 2. Convertir a Base64 para el HTML
+    
+    # Cargar imagen en Base64
     img_b64 = None
     if player_path.exists():
         with open(player_path, "rb") as f:
             img_b64 = base64.b64encode(f.read()).decode()
 
-    # 3. Retornar HTML (Imagen o Avatar genérico)
     if img_b64:
-        return f'''
-        <img src="data:image/png;base64,{img_b64}" 
-             style="width:{size}px; height:{size}px; border-radius:50%; object-fit:cover; border:3px solid {border_color};">
-        '''
-    else:
-        return f'''
-        <div style="width:{size}px; height:{size}px; border-radius:50%; background:#1a2e45; 
-                    display:flex; align-items:center; justify-content:center; font-size:{size//2}px; 
-                    border:3px solid {border_color}; color:white;">👤</div>
-        '''
+        return f'<img src="data:image/png;base64,{img_b64}" style="width:{size}px;height:{size}px;border-radius:50%;object-fit:cover;border:3px solid {border_color};">'
+    
+    # Fallback si no hay foto: iniciales
+    parts = player_name.strip().split()
+    initials = "".join(p[0].upper() for p in parts[:2]) if parts else "?"
+    return f'<div style="width:{size}px;height:{size}px;border-radius:50%;background:{border_color};display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:{size//3}px;border:3px solid {border_color};">{initials}</div>'
 
 
 # Need urllib.parse for quote
@@ -1019,7 +1005,8 @@ def render_similar_players_cards(similar: pd.DataFrame, fetch_photos: bool) -> N
         cluster = int(row[CLUSTER_COL])
         dist = float(row["distancia"])
         color = CLUSTER_COLORS[cluster % len(CLUSTER_COLORS)]
-        avatar = player_avatar_html(name, size=64, border_color=color, fetch_photo=fetch_photos)
+        avatar = player_avatar_html(name, team, size=64, border_color=color, fetch_photo=fetch_photos)
+
         cards_html += f"""
         <div class="sim-card">
             {avatar}
