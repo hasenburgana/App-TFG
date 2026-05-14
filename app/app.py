@@ -14,6 +14,9 @@ import base64
 import hashlib
 import re
 import os
+import unicodedata
+import urllib.parse
+import json
 
 # ──────────────────────────────────────────────
 # CONSTANTS
@@ -131,81 +134,76 @@ def _player_cache_key(name: str) -> str:
     return hashlib.md5(name.lower().strip().encode()).hexdigest()
 
 
-import unicodedata
-import urllib.parse
-import urllib.request
+# ── HEADERS REALISTAS (Vital para que no nos bloqueen) ──
+FOTMOB_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.fotmob.com/",
+    "Accept": "application/json, text/plain, */*",
+}
 
-# ── FUNCIÓN PARA ELIMINAR TILDES ──
 def clean_accents(text: str) -> str:
     """Elimina tildes y marcas diacríticas de un string."""
-    if not text:
-        return text
-    # Normaliza a NFD (separa la letra de la tilde)
+    if not text: return text
     text = unicodedata.normalize('NFD', text)
-    # Filtra los caracteres que no son marcas de combinación (tildes)
     return "".join(c for c in text if unicodedata.category(c) != 'Mn')
 
-# ── DICCIONARIO MANUAL DE EXCEPCIONES ──
 MANUAL_NAME_MAP = {
     "Maria Francesca Caldentey Oliver": "Mariona Caldentey",
     "María Pilar León Cebrián": "Mapi León",
     "Patricia Guijarro Gutiérrez": "Patri Guijarro",
     "Aitana Bonmati Conca": "Aitana Bonmatí",
-    "Salma Celeste Paralluelo Ayingono": "Salma Paralluelo"
+    "Salma Celeste Paralluelo Ayingono": "Salma Paralluelo",
+    "Alba Maria Redondo Ferrer": "Alba Redondo",
+    "Ona Batlle Pascual": "Ona Batlle"
 }
 
 def _search_player_fotmob_id(name: str) -> str | None:
-    """Busca en FotMob. Aplica estrategias para nombres largos de StatsBomb."""
+    """Busca en FotMob con limpieza de tildes y diccionario manual."""
     
-    # 1. Comprobar mapeo manual
     search_name = MANUAL_NAME_MAP.get(name.strip(), name.strip())
-    
-    # OPCIONAL: También podrías limpiar las tildes del search_name aquí 
-    # para que la búsqueda en la API sea más robusta:
-    search_name = clean_accents(search_name)
 
     def do_search(query: str) -> str | None:
         try:
-            # Limpiamos tildes de la query antes de enviarla a la API
             query_clean = clean_accents(query)
             clean_url = urllib.parse.quote(query_clean)
             
             url = f"https://apigw.fotmob.com/searchapi/suggest?term={clean_url}&lang=es"
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "Mozilla/5.0", # Asegúrate de tener FOTMOB_HEADERS definido
-                "Accept": "application/json",
-            })
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                import json
+            req = urllib.request.Request(url, headers=FOTMOB_HEADERS)
+            
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read())
                 hits = data.get("squadMember", []) + data.get("player", [])
                 for hit in hits:
                     pid = hit.get("participantId") or hit.get("id")
                     if pid:
                         return str(pid)
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ Error buscando en FotMob a '{query}': {e}")
             pass
         return None
 
-    # Intento 1: Nombre tal cual (o mapeado manual)
+    # Intento 1: Nombre tal cual (o el mapeado)
     pid = do_search(search_name)
     if pid: return pid
 
-    # Si es un nombre largo (StatsBomb), intentamos combinaciones
+    # Intento 2: Combinaciones si el nombre es muy largo (ej. StatsBomb)
     parts = search_name.split()
     if len(parts) > 2:
-        # Intento 2: Primer nombre + Primer apellido
+        # Ejemplo: Maria (0) Francesca (1) Caldentey (-2) Oliver (-1)
+        
+        # Intento 2.1: Nombre + 1er Apellido (Maria Caldentey)
         pid = do_search(f"{parts[0]} {parts[-2]}")
         if pid: return pid
         
-        # Intento 3: Primer nombre + Segundo apellido
+        # Intento 2.2: Nombre + 2do Apellido (Maria Oliver)
         pid = do_search(f"{parts[0]} {parts[-1]}")
         if pid: return pid
         
-        # Intento 4: Segundo nombre + Primer apellido
+        # Intento 2.3: 2do Nombre + 1er Apellido (Francesca Caldentey)
         pid = do_search(f"{parts[1]} {parts[-2]}")
         if pid: return pid
 
+    print(f"❌ FotMob ID no encontrado para: {name}")
     return None
 
 
