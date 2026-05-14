@@ -504,17 +504,18 @@ div[data-testid="column"] { background: transparent !important; }
 # --- Carga de fotos personalizadas ---
 @st.cache_data
 def load_custom_photos():
+    # Esto busca la carpeta donde está app.py
+    base_path = Path(__file__).parent if "__file__" in locals() else Path.cwd()
+    json_path = base_path / "jugadoras_fotos.json"
+    
     try:
-        # Esto obtiene la ruta de la carpeta donde está app.py
-        current_dir = Path(__file__).parent if "__file__" in locals() else Path.cwd()
-        json_path = current_dir / "jugadoras_fotos.json"
-        
         with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
+    except FileNotFoundError:
+        st.error(f"⚠️ No se encontró el archivo en: {json_path}")
+        return {}
     except Exception as e:
-        # Esto te ayudará a ver en la app qué ruta está intentando usar si falla
-        st.error(f"Error al cargar JSON. Ruta intentada: {json_path}")
-        st.exception(e)
+        st.error(f"⚠️ Error al leer el JSON: {e}")
         return {}
 
 CUSTOM_PHOTOS = load_custom_photos()
