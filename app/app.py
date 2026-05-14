@@ -345,6 +345,15 @@ def player_avatar_html(
     )'''
 def player_avatar_html(player_name: str, team_name: str, size: int = 80, border_color: str = "#2A9D8F", fetch_photo: bool = True) -> str:
     """Versión mejorada: Carga local + Wikipedia."""
+    # Si no hay equipo, usamos una carpeta genérica
+    team_slug = get_safe_path(team_name) if team_name else "desconocido"
+    player_slug = get_safe_path(player_name)
+    
+    team_dir = Path("assets/players") / team_slug
+    team_dir.mkdir(parents=True, exist_ok=True)
+    
+    player_path = team_dir / f"{player_slug}.png"
+    '''
     # Definir rutas
     team_slug = get_safe_path(team_name)
     player_slug = get_safe_path(player_name)
@@ -352,7 +361,7 @@ def player_avatar_html(player_name: str, team_name: str, size: int = 80, border_
     team_dir.mkdir(parents=True, exist_ok=True)
     
     player_path = team_dir / f"{player_slug}.png"
-    
+    '''
     # 1. Intentar descargar si no existe
     if fetch_photo and not player_path.exists():
         url = fetch_wiki_url(player_name)
@@ -1138,9 +1147,12 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
         with right:
             st.markdown('<div class="section-title"><span>◈</span>Lectura del cluster</div>', unsafe_allow_html=True)
 
-            # Representativa
+            # Representativa (Añadimos el parámetro team_name)
             rep_avatar = player_avatar_html(
-                str(medoid[PLAYER_COL]), size=52, border_color="#4a6580",
+                str(medoid[PLAYER_COL]), 
+                team_name=str(medoid[TEAM_COL]),  # <--- ESTA ES LA CORRECCIÓN
+                size=52, 
+                border_color="#4a6580",
                 fetch_photo=fetch_photos,
             )
             st.markdown(
