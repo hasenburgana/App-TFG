@@ -131,8 +131,21 @@ def _player_cache_key(name: str) -> str:
     return hashlib.md5(name.lower().strip().encode()).hexdigest()
 
 
-# ── DICCIONARIO MANUAL DE EXCEPCIONES (Opcional pero muy útil) ──
-# Aquí puedes poner a las jugadoras que sepas que fallan por apodos muy distintos
+import unicodedata
+import urllib.parse
+import urllib.request
+
+# ── FUNCIÓN PARA ELIMINAR TILDES ──
+def clean_accents(text: str) -> str:
+    """Elimina tildes y marcas diacríticas de un string."""
+    if not text:
+        return text
+    # Normaliza a NFD (separa la letra de la tilde)
+    text = unicodedata.normalize('NFD', text)
+    # Filtra los caracteres que no son marcas de combinación (tildes)
+    return "".join(c for c in text if unicodedata.category(c) != 'Mn')
+
+# ── DICCIONARIO MANUAL DE EXCEPCIONES ──
 MANUAL_NAME_MAP = {
     "Maria Francesca Caldentey Oliver": "Mariona Caldentey",
     "María Pilar León Cebrián": "Mapi León",
@@ -144,21 +157,27 @@ MANUAL_NAME_MAP = {
 def _search_player_fotmob_id(name: str) -> str | None:
     """Busca en FotMob. Aplica estrategias para nombres largos de StatsBomb."""
     
-    # 1. Comprobar si tenemos el nombre mapeado manualmente
+    # 1. Comprobar mapeo manual
     search_name = MANUAL_NAME_MAP.get(name.strip(), name.strip())
+    
+    # OPCIONAL: También podrías limpiar las tildes del search_name aquí 
+    # para que la búsqueda en la API sea más robusta:
+    search_name = clean_accents(search_name)
 
     def do_search(query: str) -> str | None:
         try:
-            clean = urllib.parse.quote(query)
-            url = f"https://apigw.fotmob.com/searchapi/suggest?term={clean}&lang=es"
+            # Limpiamos tildes de la query antes de enviarla a la API
+            query_clean = clean_accents(query)
+            clean_url = urllib.parse.quote(query_clean)
+            
+            url = f"https://apigw.fotmob.com/searchapi/suggest?term={clean_url}&lang=es"
             req = urllib.request.Request(url, headers={
-                "User-Agent": FOTMOB_HEADERS["User-Agent"],
+                "User-Agent": "Mozilla/5.0", # Asegúrate de tener FOTMOB_HEADERS definido
                 "Accept": "application/json",
             })
             with urllib.request.urlopen(req, timeout=4) as resp:
                 import json
                 data = json.loads(resp.read())
-                # Buscar tanto en plantilla como en base de jugadoras
                 hits = data.get("squadMember", []) + data.get("player", [])
                 for hit in hits:
                     pid = hit.get("participantId") or hit.get("id")
@@ -175,15 +194,15 @@ def _search_player_fotmob_id(name: str) -> str | None:
     # Si es un nombre largo (StatsBomb), intentamos combinaciones
     parts = search_name.split()
     if len(parts) > 2:
-        # Intento 2: Primer nombre + Primer apellido (Ej: Maria Caldentey)
+        # Intento 2: Primer nombre + Primer apellido
         pid = do_search(f"{parts[0]} {parts[-2]}")
         if pid: return pid
         
-        # Intento 3: Primer nombre + Segundo apellido (Ej: Maria Oliver)
+        # Intento 3: Primer nombre + Segundo apellido
         pid = do_search(f"{parts[0]} {parts[-1]}")
         if pid: return pid
         
-        # Intento 4: Segundo nombre + Primer apellido (Ej: Francesca Caldentey)
+        # Intento 4: Segundo nombre + Primer apellido
         pid = do_search(f"{parts[1]} {parts[-2]}")
         if pid: return pid
 
