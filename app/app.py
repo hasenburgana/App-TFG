@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 
@@ -31,6 +32,123 @@ METADATA_COLS = {
     "cluster_fa",
     "cluster_pca",
     "cluster_hier",
+}
+
+POS_METRICS = {
+    "CB": [
+        "pct_pases",
+        "pct_pases_largos",
+        "pct_pases_prog",
+        "pct_pases_bajo_presion",
+        "pases_ult_tercio_p90",
+        "carries_prog_p90",
+        "ratio_intercepciones_vs_entradas",
+        "duelos_ter_ganados_p90",
+        "despejes_p90",
+        "pct_aereos",
+        "pct_duelos_total",
+        "recuperaciones_p90",
+        "acciones_defensivas_campo_rival_p90",
+    ],
+    "LAT": [
+        "pct_toques_en_campo_rival",
+        "centros_p90",
+        "pases_al_area_p90",
+        "ratio_centros_vs_pases_al_area",
+        "deep_progressions_p90",
+        "xa_real_p90",
+        "carries_prog_p90",
+        "pct_regates",
+        "ratio_intercepciones_vs_entradas",
+        "acciones_defensivas_p90",
+        "duelos_ter_ganados_p90",
+        "despejes_p90",
+        "pct_duelos_total",
+        "recuperaciones_p90",
+    ],
+    "MCD": [
+        "distancia_media_pases",
+        "pct_pases_prog",
+        "pct_pases_bajo_presion",
+        "pases_progresivos_p90",
+        "pases_largos_p90",
+        "ratio_intercepciones_vs_entradas",
+        "intercepciones_p90",
+        "recuperaciones_p90",
+        "acciones_agresivas_p90",
+        "presiones_p90",
+    ],
+    "MC": [
+        "carries_prog_p90",
+        "velocidad_cond_m_s",
+        "pct_pases",
+        "pases_completados_p90",
+        "pct_pases_prog",
+        "distancia_media_pases",
+        "pases_bajo_presion_p90",
+        "xa_real_p90",
+        "presiones_p90",
+        "intercepciones_p90",
+        "recuperaciones_p90",
+        "pct_duelos_total",
+        "pases_al_area_p90",
+        "through_balls_p90",
+        "pct_toques_en_area",
+        "tiros_p90",
+    ],
+    "EXT": [
+        "regates_p90",
+        "pct_regates",
+        "carries_prog_p90",
+        "ratio_centros_vs_pases_al_area",
+        "centros_p90",
+        "pct_pases",
+        "pases_completados_p90",
+        "pct_toques_en_area",
+        "tiros_p90",
+        "xg_por_tiro",
+        "xa_real_p90",
+        "pases_clave_p90",
+    ],
+    "DEL": [
+        "ratio_tiros_vs_pases",
+        "xg_por_tiro",
+        "distancia_media_tiros",
+        "pct_toques_en_area",
+        "tiros_puerta_p90",
+        "pases_completados_p90",
+        "pct_pases",
+        "pct_pases_prog",
+        "pases_clave_p90",
+        "xa_real_p90",
+        "through_balls_p90",
+        "recibidos_de_espaldas_p90",
+        "presiones_p90",
+        "aereos_ganados_p90",
+    ],
+}
+
+DERIVED_METRIC_PREFIXES = (
+    "pct_",
+    "ratio_",
+    "rel_",
+    "obv_",
+)
+
+DERIVED_METRIC_SUFFIXES = (
+    "_p90",
+)
+
+DERIVED_METRIC_NAMES = {
+    "xg_por_tiro",
+    "distancia_media_pases",
+    "distancia_media_tiros",
+    "posicion_media_x",
+    "posicion_media_y",
+    "std_posicion_x",
+    "std_posicion_y",
+    "velocidad_cond_m_s",
+    "challenge_ratio",
 }
 
 
@@ -144,10 +262,19 @@ def normalise_required_columns(df: pd.DataFrame) -> pd.DataFrame:
 def metric_columns(df: pd.DataFrame, position: str | None = None) -> list[str]:
     source = df[df[POSITION_COL] == position] if position else df
     numeric_cols = source.select_dtypes(include=np.number).columns.tolist()
+
+    if position in POS_METRICS:
+        return [metric for metric in POS_METRICS[position] if metric in numeric_cols]
+
     metrics = [
         col
         for col in numeric_cols
         if col not in METADATA_COLS and not col.startswith("cluster")
+        and (
+            col.endswith(DERIVED_METRIC_SUFFIXES)
+            or col.startswith(DERIVED_METRIC_PREFIXES)
+            or col in DERIVED_METRIC_NAMES
+        )
     ]
     return sorted(metrics)
 
@@ -187,6 +314,137 @@ def cluster_percentiles(df_pos: pd.DataFrame, cluster: int, metrics: Iterable[st
         mean_value = df_cluster[metric].mean()
         result[metric] = percentile(df_pos[metric], mean_value)
     return result
+
+
+def cluster_radar_figure(df_pos: pd.DataFrame, metrics: list[str], position: str, top_n: int = 15) -> go.Figure:
+    medias_clusters = df_pos.groupby(CLUSTER_COL)[metrics].mean(numeric_only=True).sort_index()
+    selected_metrics = top_discriminant_metrics(df_pos, metrics, top_n)
+    if not selected_metrics:
+        selected_metrics = metrics[:top_n]
+
+    norm = pd.DataFrame(index=medias_clusters.index, columns=selected_metrics, dtype=float)
+    for metric in selected_metrics:
+        norm[metric] = [
+            percentile(df_pos[metric], medias_clusters.loc[cluster, metric])
+            for cluster in medias_clusters.index
+        ]
+
+    representative_names = representative_players(df_pos, selected_metrics)
+    colors = ["#E63946", "#457B9D", "#2A9D8F", "#F4A261", "#8E44AD", "#2357C6"]
+    labels = [clean_metric_name(metric) for metric in selected_metrics]
+
+    n_clusters = len(norm)
+    cols = min(3, n_clusters)
+    rows = int(np.ceil(n_clusters / cols))
+    specs = [[{"type": "polar"} for _ in range(cols)] for _ in range(rows)]
+    titles = [
+        f"Cluster {cluster}<br><sup>{representative_names.get(cluster, 'Representativa no disponible')}</sup>"
+        for cluster in norm.index
+    ]
+
+    fig = make_subplots(
+        rows=rows,
+        cols=cols,
+        specs=specs,
+        subplot_titles=titles,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.16,
+    )
+
+    for i, cluster in enumerate(norm.index):
+        row = i // cols + 1
+        col = i % cols + 1
+        values = norm.loc[cluster].astype(float).tolist()
+        color = colors[i % len(colors)]
+        fig.add_trace(
+            go.Scatterpolar(
+                r=values + values[:1],
+                theta=labels + labels[:1],
+                fill="toself",
+                name=f"Cluster {cluster}",
+                line=dict(color=color, width=2),
+                fillcolor=color,
+                opacity=0.78,
+                hovertemplate="%{theta}<br>Percentil %{r:.0f}%<extra></extra>",
+            ),
+            row=row,
+            col=col,
+        )
+
+        polar_name = "polar" if i == 0 else f"polar{i + 1}"
+        fig.layout[polar_name].update(
+            radialaxis=dict(range=[0, 100], tickvals=[25, 50, 75], ticktext=["", "50%", ""], showline=False),
+            angularaxis=dict(tickfont=dict(size=10, color="#333333")),
+        )
+
+    fig.update_layout(
+        title=f"Perfiles tácticos por percentil · Posición: {position}",
+        height=380 * rows + 90,
+        showlegend=False,
+        margin=dict(l=30, r=30, t=90, b=35),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
+
+
+def representative_players(df_pos: pd.DataFrame, metrics: list[str]) -> dict[int, str]:
+    if not metrics:
+        return {}
+
+    result: dict[int, str] = {}
+    values = df_pos[metrics].apply(pd.to_numeric, errors="coerce").fillna(df_pos[metrics].median())
+    std = values.std(ddof=0).replace(0, 1)
+    z_values = (values - values.mean()) / std
+
+    for cluster, cluster_df in df_pos.groupby(CLUSTER_COL):
+        cluster_z = z_values.loc[cluster_df.index]
+        centroid = cluster_z.mean()
+        distances = np.sqrt(((cluster_z - centroid) ** 2).sum(axis=1))
+        representative_index = distances.idxmin()
+        result[int(cluster)] = str(df_pos.loc[representative_index, PLAYER_COL])
+
+    return result
+
+
+def player_cluster_bar_figure(
+    player_name: str,
+    cluster: int,
+    player_pct: dict[str, float],
+    cluster_pct: dict[str, float],
+) -> go.Figure:
+    metrics = list(player_pct.keys())
+    labels = [clean_metric_name(metric) for metric in metrics]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            y=labels,
+            x=[player_pct[metric] for metric in metrics],
+            name=player_name,
+            orientation="h",
+            marker_color="#2357c6",
+            hovertemplate="%{y}<br>Percentil %{x:.0f}%<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            y=labels,
+            x=[cluster_pct[metric] for metric in metrics],
+            name=f"Media cluster {cluster}",
+            orientation="h",
+            marker_color="#0f8f8c",
+            hovertemplate="%{y}<br>Percentil %{x:.0f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        barmode="group",
+        height=max(420, 34 * len(metrics) + 120),
+        xaxis=dict(range=[0, 100], ticksuffix="%"),
+        yaxis=dict(autorange="reversed"),
+        legend=dict(orientation="h"),
+        margin=dict(l=130, r=25, t=25, b=45),
+    )
+    return fig
 
 
 def cluster_z_summary(df_pos: pd.DataFrame, cluster: int, metrics: Iterable[str]) -> pd.DataFrame:
@@ -277,40 +535,16 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     player_pct = player_percentiles(df_pos, player, top_metrics)
     cluster_pct = cluster_percentiles(df_pos, cluster, top_metrics)
 
-    radar = go.Figure()
-    theta = [clean_metric_name(metric) for metric in top_metrics]
-    player_values = [player_pct[metric] for metric in top_metrics]
-    cluster_values = [cluster_pct[metric] for metric in top_metrics]
+    st.subheader("Radares de perfiles tácticos")
+    st.plotly_chart(cluster_radar_figure(df_pos, metrics, position, top_n=15), use_container_width=True)
 
-    radar.add_trace(
-        go.Scatterpolar(
-            r=player_values + player_values[:1],
-            theta=theta + theta[:1],
-            fill="toself",
-            name=str(player[PLAYER_COL]),
-            line=dict(color="#2357c6", width=3),
-        )
-    )
-    radar.add_trace(
-        go.Scatterpolar(
-            r=cluster_values + cluster_values[:1],
-            theta=theta + theta[:1],
-            fill="toself",
-            name=f"Media cluster {cluster}",
-            line=dict(color="#0f8f8c", width=2),
-        )
-    )
-    radar.update_layout(
-        height=620,
-        margin=dict(l=40, r=40, t=35, b=35),
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%")),
-        legend=dict(orientation="h"),
-    )
-
-    left, right = st.columns([1.35, 1])
+    left, right = st.columns([1.15, 1])
     with left:
-        st.subheader("Radar interactivo")
-        st.plotly_chart(radar, use_container_width=True)
+        st.subheader("Jugadora vs media de su cluster")
+        st.plotly_chart(
+            player_cluster_bar_figure(str(player[PLAYER_COL]), cluster, player_pct, cluster_pct),
+            use_container_width=True,
+        )
 
     with right:
         st.subheader("Lectura del cluster")
@@ -348,7 +582,10 @@ def render_profile_mode(df: pd.DataFrame, position: str) -> None:
     suggested = top_discriminant_metrics(df_pos, metrics, 18)
 
     st.subheader("Crear un perfil con métricas y pesos")
-    st.caption("Peso positivo: busca valores altos. Peso negativo: busca valores bajos. Cero: no se usa.")
+    st.caption(
+        "Solo se muestran las métricas usadas para construir perfiles en esa posición. "
+        "Peso positivo: busca valores altos. Peso negativo: busca valores bajos. Cero: no se usa."
+    )
 
     selected_metrics = st.multiselect(
         "Métricas candidatas",
