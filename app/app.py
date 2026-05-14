@@ -344,19 +344,16 @@ def player_avatar_html(
     player_name: str,
     size: int = 72,
     border_color: str = "#2A9D8F",
-    fetch_photo: bool = True,
-    team_name: str = None # Añadimos equipo para buscar bandera
+    fetch_photo: bool = True
 ) -> str:
-    """Retorna <img> usando JSON local, FotMob o iniciales."""
+    """Retorna el HTML de la imagen buscando primero en el JSON local."""
     img_url = None
     
-    # 1. Intentar buscar en tu JSON (Jugadora o Selección)
+    # 1. Buscar en el JSON cargado
     if player_name in CUSTOM_PHOTOS:
         img_url = CUSTOM_PHOTOS[player_name]
-    elif team_name in CUSTOM_PHOTOS:
-        img_url = CUSTOM_PHOTOS[team_name]
 
-    # 2. Si encontramos URL en JSON, la usamos directamente
+    # 2. Si existe en el JSON, devolvemos el HTML con esa URL
     if img_url:
         return (
             f'<img src="{img_url}" '
@@ -365,10 +362,11 @@ def player_avatar_html(
             f'background:#0d1b2a;" />'
         )
 
-    # 3. Si no está en JSON, intentar el proceso original de FotMob (solo para jugadoras)
+    # 3. Si NO está en el JSON, intentar la lógica original de FotMob (Base64)
     b64 = None
     if fetch_photo:
         try:
+            # Aquí asumo que mantienes tu función original get_player_photo_b64
             b64 = get_player_photo_b64(player_name)
         except Exception:
             pass
@@ -381,7 +379,7 @@ def player_avatar_html(
             f'background:#0d1b2a;" />'
         )
 
-    # 4. Fallback: Iniciales
+    # 4. Fallback: Iniciales si nada de lo anterior funciona
     parts = player_name.strip().split()
     initials = "".join(p[0].upper() for p in parts[:2]) if parts else "?"
     return (
@@ -502,12 +500,15 @@ div[data-testid="column"] { background: transparent !important; }
 # ──────────────────────────────────────────────
 # DATA LOADING
 # ──────────────────────────────────────────────
+# --- Carga de fotos personalizadas ---
 @st.cache_data
 def load_custom_photos():
     try:
+        # Importante: verifica que el nombre del archivo sea exacto
         with open("jugadoras_fotos.json", "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        st.warning(f"No se pudo cargar jugadoras_fotos.json: {e}")
         return {}
 
 CUSTOM_PHOTOS = load_custom_photos()
@@ -1088,17 +1089,22 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     cluster_color = CLUSTER_COLORS[cluster % len(CLUSTER_COLORS)]
     pos_label = POS_LABELS.get(position, position)
     comp = str(player.get("competicion", "—")) if "competicion" in player.index else "—"
+    # --- Dentro de render_player_mode ---
     team_name = str(player[TEAM_COL])
+    player_display_name = str(player[PLAYER_COL])
+    
+    # Generar el avatar (usará la foto del JSON si existe)
     avatar_html = player_avatar_html(
         player_display_name, size=80, border_color=cluster_color, fetch_photo=fetch_photo
     )
     
-    # Creamos el HTML de la bandera si existe en el JSON
+    # Buscar si el equipo tiene bandera en el JSON
     flag_html = ""
     if team_name in CUSTOM_PHOTOS:
         flag_url = CUSTOM_PHOTOS[team_name]
-        flag_html = f'<img src="{flag_url}" style="height:14px; margin-left:8px; vertical-align:middle; border-radius:2px;">'
+        flag_html = f'<img src="{flag_url}" style="height:16px; margin-left:8px; vertical-align:middle; border-radius:2px;">'
     
+    # Renderizar el encabezado
     st.markdown(
         f"""
         <div class="player-header">
