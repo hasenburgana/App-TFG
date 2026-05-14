@@ -131,28 +131,62 @@ def _player_cache_key(name: str) -> str:
     return hashlib.md5(name.lower().strip().encode()).hexdigest()
 
 
+# ── DICCIONARIO MANUAL DE EXCEPCIONES (Opcional pero muy útil) ──
+# Aquí puedes poner a las jugadoras que sepas que fallan por apodos muy distintos
+MANUAL_NAME_MAP = {
+    "Maria Francesca Caldentey Oliver": "Mariona Caldentey",
+    "María Pilar León Cebrián": "Mapi León",
+    "Patricia Guijarro Gutiérrez": "Patri Guijarro",
+    "Aitana Bonmati Conca": "Aitana Bonmatí",
+    "Salma Celeste Paralluelo Ayingono": "Salma Paralluelo"
+}
+
 def _search_player_fotmob_id(name: str) -> str | None:
-    """Search FotMob for a player and return their ID."""
-    try:
-        clean = urllib.parse.quote(name)
-        url = f"https://apigw.fotmob.com/searchapi/suggest?term={clean}&lang=es"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": FOTMOB_HEADERS["User-Agent"],
-            "Accept": "application/json",
-        })
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            import json
-            data = json.loads(resp.read())
-            for hit in data.get("squadMember", []):
-                pid = hit.get("participantId") or hit.get("id")
-                if pid:
-                    return str(pid)
-            for hit in data.get("player", []):
-                pid = hit.get("participantId") or hit.get("id")
-                if pid:
-                    return str(pid)
-    except Exception:
-        pass
+    """Busca en FotMob. Aplica estrategias para nombres largos de StatsBomb."""
+    
+    # 1. Comprobar si tenemos el nombre mapeado manualmente
+    search_name = MANUAL_NAME_MAP.get(name.strip(), name.strip())
+
+    def do_search(query: str) -> str | None:
+        try:
+            clean = urllib.parse.quote(query)
+            url = f"https://apigw.fotmob.com/searchapi/suggest?term={clean}&lang=es"
+            req = urllib.request.Request(url, headers={
+                "User-Agent": FOTMOB_HEADERS["User-Agent"],
+                "Accept": "application/json",
+            })
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                import json
+                data = json.loads(resp.read())
+                # Buscar tanto en plantilla como en base de jugadoras
+                hits = data.get("squadMember", []) + data.get("player", [])
+                for hit in hits:
+                    pid = hit.get("participantId") or hit.get("id")
+                    if pid:
+                        return str(pid)
+        except Exception:
+            pass
+        return None
+
+    # Intento 1: Nombre tal cual (o mapeado manual)
+    pid = do_search(search_name)
+    if pid: return pid
+
+    # Si es un nombre largo (StatsBomb), intentamos combinaciones
+    parts = search_name.split()
+    if len(parts) > 2:
+        # Intento 2: Primer nombre + Primer apellido (Ej: Maria Caldentey)
+        pid = do_search(f"{parts[0]} {parts[-2]}")
+        if pid: return pid
+        
+        # Intento 3: Primer nombre + Segundo apellido (Ej: Maria Oliver)
+        pid = do_search(f"{parts[0]} {parts[-1]}")
+        if pid: return pid
+        
+        # Intento 4: Segundo nombre + Primer apellido (Ej: Francesca Caldentey)
+        pid = do_search(f"{parts[1]} {parts[-2]}")
+        if pid: return pid
+
     return None
 
 
