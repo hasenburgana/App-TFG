@@ -209,7 +209,7 @@ def inject_css() -> None:
 
 
 @st.cache_data(show_spinner=False)
-def read_csv_from_bytes(content: bytes | None) -> pd.DataFrame:
+def read_csv_from_bytes(content: bytes | None, file_mtime: float | None = None) -> pd.DataFrame:
     if content is not None:
         return pd.read_csv(BytesIO(content))
     return pd.read_csv(DATA_PATH)
@@ -230,7 +230,8 @@ def load_data() -> pd.DataFrame | None:
         return None
 
     content = uploaded.getvalue() if uploaded is not None else None
-    df = read_csv_from_bytes(content)
+    file_mtime = DATA_PATH.stat().st_mtime if uploaded is None and DATA_PATH.exists() else None
+    df = read_csv_from_bytes(content, file_mtime)
     df = normalise_required_columns(df)
     return df
 
@@ -317,6 +318,10 @@ def scaled_p05_p95_values(df_pos: pd.DataFrame, row: pd.Series, metrics: list[st
     return values.astype(float).to_dict()
 
 
+def cluster_mean_row(df_pos: pd.DataFrame, cluster: int, metrics: list[str]) -> pd.Series:
+    return df_pos[df_pos[CLUSTER_COL] == cluster][metrics].mean(numeric_only=True)
+
+
 def cluster_percentiles(df_pos: pd.DataFrame, cluster: int, metrics: Iterable[str]) -> dict[str, float]:
     df_cluster = df_pos[df_pos[CLUSTER_COL] == cluster]
     result = {}
@@ -372,8 +377,8 @@ def player_cluster_radar_figure(
     player_name: str,
     cluster: int,
     player_values_by_metric: dict[str, float],
-    medoid_name: str,
-    medoid_values_by_metric: dict[str, float],
+    representative_name: str,
+    representative_values_by_metric: dict[str, float],
     position: str,
 ) -> go.Figure:
     metrics = list(player_values_by_metric.keys())
@@ -381,7 +386,7 @@ def player_cluster_radar_figure(
     angles = radar_angles(len(metrics))
     closed_angles = angles + [360.0]
     player_values = [player_values_by_metric[metric] for metric in metrics]
-    medoid_values = [medoid_values_by_metric[metric] for metric in metrics]
+    representative_values = [representative_values_by_metric[metric] for metric in metrics]
 
     fig = go.Figure()
     fig.add_trace(
@@ -399,11 +404,11 @@ def player_cluster_radar_figure(
     )
     fig.add_trace(
         go.Scatterpolar(
-            r=medoid_values + medoid_values[:1],
+            r=representative_values + representative_values[:1],
             theta=closed_angles,
             mode="lines+markers",
             fill="toself",
-            name=f"Medoide Cluster {cluster} ({medoid_name[:24]})",
+            name=f"Perfil Típico Cluster {cluster} ({representative_name[:24]})",
             line=dict(color="#95A5A6", width=2.5),
             marker=dict(size=5),
             text=labels + labels[:1],
@@ -642,7 +647,7 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     selected_index = st.sidebar.selectbox("Jugadora", options=list(labels), format_func=labels.get)
     player = df_pos.loc[selected_index]
     cluster = int(player[CLUSTER_COL])
-    top_metrics = top_discriminant_metrics(df_pos, metrics, 12)
+    top_metrics = top_discriminant_metrics(df_pos, metrics, 20)
 
     st.markdown(
         f"### {player[PLAYER_COL]}  \n"
@@ -657,8 +662,9 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
     col_c.metric("Métricas del radar", len(top_metrics))
 
     medoid = cluster_medoid_player(df_pos, cluster)
+    cluster_mean = cluster_mean_row(df_pos, cluster, top_metrics)
     player_radar_values = scaled_p05_p95_values(df_pos, player, top_metrics)
-    medoid_radar_values = scaled_p05_p95_values(df_pos, medoid, top_metrics)
+    cluster_mean_radar_values = scaled_p05_p95_values(df_pos, cluster_mean, top_metrics)
 
     left, right = st.columns([1.25, 1])
     with left:
@@ -669,7 +675,7 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
                 cluster,
                 player_radar_values,
                 str(medoid[PLAYER_COL]),
-                medoid_radar_values,
+                cluster_mean_radar_values,
                 position,
             ),
             use_container_width=True,
@@ -677,7 +683,8 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
 
     with right:
         st.subheader("Lectura del cluster")
-        st.write(f"**Medoide del cluster:** {medoid[PLAYER_COL]}")
+        st.write(f"**Representativa PAM:** {medoid[PLAYER_COL]}")
+        st.write("**Radar gris:** media del cluster, como perfil típico.")
         z_summary = cluster_z_summary(df_pos, cluster, top_metrics)
         strengths = z_summary.head(4)
         weaknesses = z_summary.tail(4).sort_values("z")
