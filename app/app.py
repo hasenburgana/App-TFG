@@ -342,7 +342,7 @@ def get_player_photo_b64(player_name: str) -> str | None:
 #     return f'<div style="width:{size}px;height:{size}px;border-radius:50%;background:{border_color};display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:{size//3}px;border:3px solid {border_color};">{initials}</div>'
 def player_avatar_html(
     player_name: str,
-    team_name: str = None
+    team_name: str = None,
     size: int = 72,
     border_color: str = "#2A9D8F",
     fetch_photo: bool = True
