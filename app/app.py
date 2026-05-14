@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterable
-from io import BytesIO
-
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -155,8 +153,7 @@ DERIVED_METRIC_NAMES = {
 
 
 st.set_page_config(
-    page_title="TFG Perfiladoras",
-    page_icon="⚽",
+    page_title="Scout Profiles Lab",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -166,22 +163,39 @@ def inject_css() -> None:
     st.markdown(
         """
         <style>
+        .stApp {
+            background: linear-gradient(180deg, #f4f7fb 0%, #f8fafc 48%, #ffffff 100%);
+        }
         .main .block-container {
-            padding-top: 1.4rem;
-            padding-bottom: 2rem;
+            padding-top: 1rem;
+            padding-bottom: 2.4rem;
+            max-width: 1480px;
         }
         [data-testid="stSidebar"] {
-            background: #f7f9fc;
+            background: #ffffff;
             border-right: 1px solid #d8dee8;
         }
         h1, h2, h3 {
             letter-spacing: 0;
+        }
+        h1 {
+            font-size: 2.25rem;
+            line-height: 1.08;
+            color: #17202a;
+        }
+        h2, h3 {
+            color: #17202a;
         }
         div[data-testid="stMetric"] {
             border: 1px solid #d8dee8;
             border-radius: 8px;
             padding: 12px;
             background: #ffffff;
+            box-shadow: 0 8px 22px rgba(22, 34, 51, 0.04);
+        }
+        div[data-testid="stMetricValue"] {
+            color: #17202a;
+            font-weight: 800;
         }
         .profile-pill {
             display: inline-block;
@@ -190,6 +204,44 @@ def inject_css() -> None:
             color: white;
             background: #2357c6;
             font-weight: 800;
+        }
+        .hero {
+            border: 1px solid #d8dee8;
+            border-radius: 8px;
+            padding: 22px 24px;
+            background:
+                linear-gradient(135deg, rgba(35,87,198,.10), rgba(15,143,140,.08)),
+                #ffffff;
+            box-shadow: 0 14px 36px rgba(22, 34, 51, 0.06);
+            margin-bottom: 18px;
+        }
+        .hero-kicker {
+            color: #0f8f8c;
+            text-transform: uppercase;
+            font-weight: 850;
+            font-size: .78rem;
+            letter-spacing: .06em;
+            margin-bottom: 8px;
+        }
+        .hero-title {
+            font-size: 2.25rem;
+            line-height: 1.05;
+            margin: 0 0 8px 0;
+            font-weight: 850;
+            color: #17202a;
+        }
+        .hero-copy {
+            max-width: 920px;
+            color: #526070;
+            font-size: 1rem;
+            margin: 0;
+        }
+        .section-card {
+            border: 1px solid #d8dee8;
+            border-radius: 8px;
+            padding: 16px 18px;
+            background: #ffffff;
+            box-shadow: 0 8px 24px rgba(22, 34, 51, 0.045);
         }
         .soft-box {
             border: 1px solid #d8dee8;
@@ -202,6 +254,64 @@ def inject_css() -> None:
             color: #667085;
             font-size: 0.88rem;
         }
+        .sidebar-brand {
+            border: 1px solid #d8dee8;
+            border-radius: 8px;
+            padding: 14px;
+            background: #f8fafc;
+            margin-bottom: 14px;
+        }
+        .sidebar-brand strong {
+            display: block;
+            font-size: 1.05rem;
+            margin-bottom: 4px;
+            color: #17202a;
+        }
+        .sidebar-brand span {
+            color: #667085;
+            font-size: .86rem;
+        }
+        .info-strip {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin: 12px 0 6px;
+        }
+        .info-chip {
+            border: 1px solid #d8dee8;
+            border-radius: 8px;
+            padding: 10px 12px;
+            background: #ffffff;
+        }
+        .info-chip span {
+            display: block;
+            color: #667085;
+            font-size: .76rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .info-chip strong {
+            display: block;
+            color: #17202a;
+            font-size: 1rem;
+            margin-top: 3px;
+        }
+        .glossary-term {
+            font-weight: 800;
+            color: #17202a;
+        }
+        .glossary-copy {
+            color: #526070;
+            margin-bottom: .7rem;
+        }
+        @media (max-width: 900px) {
+            .info-strip {
+                grid-template-columns: 1fr;
+            }
+            .hero-title {
+                font-size: 1.7rem;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -209,29 +319,20 @@ def inject_css() -> None:
 
 
 @st.cache_data(show_spinner=False)
-def read_csv_from_bytes(content: bytes | None, file_mtime: float | None = None) -> pd.DataFrame:
-    if content is not None:
-        return pd.read_csv(BytesIO(content))
+def read_csv_from_bytes(file_mtime: float | None = None) -> pd.DataFrame:
     return pd.read_csv(DATA_PATH)
 
 
 def load_data() -> pd.DataFrame | None:
-    uploaded = st.sidebar.file_uploader(
-        "CSV de perfiles",
-        type=["csv"],
-        help="Opcional. Si no subes archivo, se usa data/perfiles_finales.csv.",
-    )
-
-    if uploaded is None and not DATA_PATH.exists():
+    if not DATA_PATH.exists():
         st.error(
-            "No encuentro `data/perfiles_finales.csv`. Sube el CSV en la barra lateral "
-            "o colócalo en esa ruta dentro del repositorio."
+            "No encuentro `data/perfiles_finales.csv`. Coloca el CSV exportado desde Colab "
+            "en esa ruta dentro del repositorio."
         )
         return None
 
-    content = uploaded.getvalue() if uploaded is not None else None
-    file_mtime = DATA_PATH.stat().st_mtime if uploaded is None and DATA_PATH.exists() else None
-    df = read_csv_from_bytes(content, file_mtime)
+    file_mtime = DATA_PATH.stat().st_mtime
+    df = read_csv_from_bytes(file_mtime)
     df = normalise_required_columns(df)
     return df
 
@@ -976,19 +1077,96 @@ def render_methodology_note() -> None:
         )
 
 
+def render_app_header(df: pd.DataFrame, positions: list[str]) -> None:
+    st.markdown(
+        """
+        <div class="hero">
+            <div class="hero-kicker">Player profiling dashboard</div>
+            <div class="hero-title">Scout Profiles Lab</div>
+            <p class="hero-copy">
+                Herramienta interactiva para interpretar perfiles tácticos de jugadoras, comparar cada caso
+                con su cluster y construir rankings personalizados a partir de métricas ponderadas.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    clusters = int(df[[POSITION_COL, CLUSTER_COL]].drop_duplicates().shape[0])
+    competitions = int(df["competicion"].nunique()) if "competicion" in df.columns else 1
+    st.markdown(
+        f"""
+        <div class="info-strip">
+            <div class="info-chip"><span>Jugadoras</span><strong>{len(df)}</strong></div>
+            <div class="info-chip"><span>Posiciones</span><strong>{len(positions)}</strong></div>
+            <div class="info-chip"><span>Perfiles detectados</span><strong>{clusters}</strong></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Datos cargados desde `{DATA_PATH}` · competiciones: {competitions}")
+
+
+def render_sidebar_intro() -> None:
+    st.sidebar.markdown(
+        """
+        <div class="sidebar-brand">
+            <strong>Scout Profiles Lab</strong>
+            <span>Explora perfiles por clustering o crea un perfil propio con pesos.</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_glossary() -> None:
+    with st.expander("Glosario y funcionamiento de la herramienta"):
+        st.markdown(
+            """
+            <div class="glossary-copy">
+                <span class="glossary-term">Modo jugadora.</span>
+                Selecciona una posición y una jugadora. La app muestra su cluster, un radar frente al perfil típico
+                del cluster, una interpretación automática y jugadoras similares.
+            </div>
+            <div class="glossary-copy">
+                <span class="glossary-term">Modo perfil creado.</span>
+                El usuario elige métricas y pesos. Pesos positivos buscan valores altos; pesos negativos buscan valores
+                bajos. El score final indica el grado de encaje de cada jugadora con ese perfil.
+            </div>
+            <div class="glossary-copy">
+                <span class="glossary-term">Cluster.</span>
+                Grupo de jugadoras con comportamiento estadístico parecido dentro de una misma posición.
+            </div>
+            <div class="glossary-copy">
+                <span class="glossary-term">Perfil típico.</span>
+                En el radar gris se usa la media del cluster, normalizada como en el notebook, para representar el
+                patrón medio del grupo. El nombre entre paréntesis es la representativa PAM exportada.
+            </div>
+            <div class="glossary-copy">
+                <span class="glossary-term">Radar p05-p95.</span>
+                Cada métrica se escala entre el percentil 5 y el percentil 95 de la posición. Así se reduce el efecto
+                de valores extremos y se comparan métricas con unidades distintas.
+            </div>
+            <div class="glossary-copy">
+                <span class="glossary-term">Interpretación automática.</span>
+                Resume qué métricas están por encima o por debajo de la media de la posición y asigna una familia
+                dominante: pase, defensa, progresión, finalización o posicionamiento.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def main() -> None:
     inject_css()
-    st.title("TFG Perfiladoras")
-    st.caption("Explorador interactivo de perfiles de jugadoras con clustering y score supervisado.")
-
     df = load_data()
     if df is None:
         return
 
     positions = sorted(df[POSITION_COL].dropna().unique().tolist())
+    render_sidebar_intro()
     position = st.sidebar.selectbox("Posición", positions)
     mode = st.sidebar.radio(
-        "Forma de encontrar perfiles",
+        "Modo de análisis",
         ["A partir de una jugadora", "A partir de un perfil creado"],
     )
 
@@ -996,11 +1174,14 @@ def main() -> None:
     st.sidebar.metric("Jugadoras cargadas", len(df))
     st.sidebar.metric("Posiciones", len(positions))
 
+    render_app_header(df, positions)
+
     if mode == "A partir de una jugadora":
         render_player_mode(df, position)
     else:
         render_profile_mode(df, position)
 
+    render_glossary()
     render_methodology_note()
 
 
