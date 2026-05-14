@@ -290,6 +290,21 @@ def clean_metric_name(metric: str) -> str:
     )
 
 
+def metric_family(metric: str) -> str:
+    metric_lower = metric.lower()
+    if any(token in metric_lower for token in ["xg", "tiros", "goles", "area", "espaldas"]):
+        return "finalización y presencia en área"
+    if any(token in metric_lower for token in ["pases", "through", "xa", "asistencias", "centros"]):
+        return "pase y creación"
+    if any(token in metric_lower for token in ["carries", "regates", "progressions", "condu", "velocidad"]):
+        return "conducción y progresión"
+    if any(token in metric_lower for token in ["presiones", "recuperaciones", "intercepciones", "defensivas", "despejes", "duelos", "aereos"]):
+        return "defensa y recuperación"
+    if any(token in metric_lower for token in ["posicion", "std_"]):
+        return "posicionamiento"
+    return "perfil mixto"
+
+
 def percentile(series: pd.Series, value: float) -> float:
     clean = pd.to_numeric(series, errors="coerce").dropna()
     if clean.empty or pd.isna(value):
@@ -588,6 +603,42 @@ def cluster_z_summary(df_pos: pd.DataFrame, cluster: int, metrics: Iterable[str]
     return pd.DataFrame(rows).sort_values("z", ascending=False)
 
 
+def automatic_cluster_interpretation(df_pos: pd.DataFrame, cluster: int, metrics: list[str]) -> dict[str, object]:
+    summary = cluster_z_summary(df_pos, cluster, metrics)
+    highs = summary.head(4)
+    lows = summary.tail(3).sort_values("z")
+    cluster_size = int((df_pos[CLUSTER_COL] == cluster).sum())
+
+    families = highs["metric"].map(metric_family).value_counts()
+    dominant_family = families.index[0] if not families.empty else "perfil mixto"
+    high_names = [clean_metric_name(metric) for metric in highs["metric"].tolist()]
+    low_names = [clean_metric_name(metric) for metric in lows["metric"].tolist()]
+
+    text = (
+        f"Cluster {cluster}: perfil con tendencia principal hacia {dominant_family}. "
+        f"Destaca por {', '.join(high_names[:3])}. "
+        f"Sus valores relativamente más bajos aparecen en {', '.join(low_names[:2])}. "
+        f"Contiene {cluster_size} jugadoras."
+    )
+
+    return {
+        "cluster": cluster,
+        "familia": dominant_family,
+        "interpretacion": text,
+        "fortalezas": ", ".join(high_names),
+        "debilidades": ", ".join(low_names),
+        "n": cluster_size,
+    }
+
+
+def all_cluster_interpretations(df_pos: pd.DataFrame, metrics: list[str]) -> pd.DataFrame:
+    rows = [
+        automatic_cluster_interpretation(df_pos, int(cluster), metrics)
+        for cluster in sorted(df_pos[CLUSTER_COL].dropna().unique())
+    ]
+    return pd.DataFrame(rows)
+
+
 def similar_players(df_pos: pd.DataFrame, player: pd.Series, metrics: list[str], limit: int = 10) -> pd.DataFrame:
     if not metrics:
         return pd.DataFrame()
@@ -620,6 +671,94 @@ def profile_score(df_pos: pd.DataFrame, weights: dict[str, int]) -> pd.DataFrame
     result = df_pos[[PLAYER_COL, TEAM_COL, POSITION_COL, CLUSTER_COL]].copy()
     result["score"] = (scores / total_weight * 100).round(2)
     return result.sort_values("score", ascending=False)
+
+
+def profile_radar_figure(
+    df_pos: pd.DataFrame,
+    weights: dict[str, int],
+    scores: pd.DataFrame,
+) -> go.Figure:
+    active = {metric: weight for metric, weight in weights.items() if weight != 0}
+    metrics = list(active.keys())
+    labels = [clean_metric_name(metric) for metric in metrics]
+    angles = radar_angles(len(metrics))
+    closed_angles = angles + [360.0]
+
+    desired_values = [
+        0.5 + (np.sign(active[metric]) * abs(active[metric]) / 5.0 * 0.35)
+        for metric in metrics
+    ]
+
+    best_values = []
+    best_name = "Mejor encaje"
+    if not scores.empty:
+        best_row = scores.iloc[0]
+        best_name = str(best_row[PLAYER_COL])
+        best_match = df_pos[
+            (df_pos[PLAYER_COL] == best_row[PLAYER_COL])
+            & (df_pos[TEAM_COL] == best_row[TEAM_COL])
+        ]
+        if best_match.empty:
+            best_match = df_pos[df_pos[PLAYER_COL] == best_row[PLAYER_COL]]
+        if not best_match.empty:
+            best_values_by_metric = scaled_p05_p95_values(df_pos, best_match.iloc[0], metrics)
+            best_values = [best_values_by_metric[metric] for metric in metrics]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatterpolar(
+            r=desired_values + desired_values[:1],
+            theta=closed_angles,
+            mode="lines+markers",
+            fill="toself",
+            name="Perfil buscado",
+            line=dict(color="#2357c6", width=3),
+            marker=dict(size=6),
+            text=labels + labels[:1],
+            hovertemplate="%{text}<br>Objetivo: %{r:.2f}<extra></extra>",
+        )
+    )
+    if best_values:
+        fig.add_trace(
+            go.Scatterpolar(
+                r=best_values + best_values[:1],
+                theta=closed_angles,
+                mode="lines+markers",
+                fill="toself",
+                name=f"Mejor encaje: {best_name[:24]}",
+                line=dict(color="#0f8f8c", width=2.5),
+                marker=dict(size=5),
+                text=labels + labels[:1],
+                hovertemplate="%{text}<br>Escala p05-p95: %{r:.2f}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        height=520,
+        margin=dict(l=50, r=50, t=35, b=45),
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1],
+                tickvals=[0.15, 0.5, 0.85],
+                ticktext=["bajo", "medio", "alto"],
+                gridcolor="#d8dee8",
+            ),
+            angularaxis=dict(
+                tickmode="array",
+                tickvals=angles,
+                ticktext=labels,
+                rotation=90,
+                direction="clockwise",
+                tickfont=dict(size=10, color="#667085"),
+                gridcolor="#d8dee8",
+            ),
+        ),
+        legend=dict(orientation="h", y=-0.08),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
 
 
 def render_player_mode(df: pd.DataFrame, position: str) -> None:
@@ -685,6 +824,10 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
         st.subheader("Lectura del cluster")
         st.write(f"**Representativa PAM:** {medoid[PLAYER_COL]}")
         st.write("**Radar gris:** media del cluster, como perfil típico.")
+        interpretation = automatic_cluster_interpretation(df_pos, cluster, top_metrics)
+        st.markdown("**Interpretación automática**")
+        st.write(interpretation["interpretacion"])
+
         z_summary = cluster_z_summary(df_pos, cluster, top_metrics)
         strengths = z_summary.head(4)
         weaknesses = z_summary.tail(4).sort_values("z")
@@ -706,6 +849,22 @@ def render_player_mode(df: pd.DataFrame, position: str) -> None:
                     TEAM_COL: "Equipo",
                     CLUSTER_COL: "Cluster",
                     "distancia": "Distancia",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("Interpretación automática de todos los clusters de la posición"):
+        st.dataframe(
+            all_cluster_interpretations(df_pos, metrics).rename(
+                columns={
+                    "cluster": "Cluster",
+                    "familia": "Familia dominante",
+                    "interpretacion": "Interpretación",
+                    "fortalezas": "Fortalezas",
+                    "debilidades": "Debilidades",
+                    "n": "N",
                 }
             ),
             use_container_width=True,
@@ -765,6 +924,9 @@ def render_profile_mode(df: pd.DataFrame, position: str) -> None:
     if scores.empty:
         st.info("Selecciona al menos una métrica con peso distinto de cero.")
         return
+
+    st.subheader("Radar del perfil buscado")
+    st.plotly_chart(profile_radar_figure(df_pos, weights, scores), use_container_width=True)
 
     left, right = st.columns([1.1, 1])
     with left:
